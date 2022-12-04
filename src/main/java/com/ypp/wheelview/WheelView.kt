@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.*
@@ -72,11 +71,11 @@ class WheelView: View {
     private var enableCircle = true
 
     /**
-     * By default, the farther item is from the middle line, the smaller text height ( notice just
-     * height ). Which just make the text look like it's stick on a circle. When set to true,
-     * there is no stretching for the text.
+     * By default, the farther the item is from the middle line, the stronger the text height is
+     * scaled ( square of scale ). Which just make the text look like it's stick on a circle.
+     * When set to true, there is no stretching for the text height.
      */
-    private var enableFlatDisplay = false
+    private var enableLinearScale = false
 
     private var data = listOf<String>()
 
@@ -186,26 +185,55 @@ class WheelView: View {
      * @return the scale of the item
      */
     private fun getScale(offset: Float): Float {
-        return sqrt(1 - (offset / (height / 2)).pow(2))
+        return getScale(offset, height / 2)
     }
 
-    private fun getScale(offset: Int): Float {
-        return getScale(offset.toFloat())
+    private fun getScale(offset: Float, total: Int): Float {
+        return sqrt(1 - (offset / total).pow(2))
     }
 
     /**
-     * Compute the theoretical height of this view
+     * Estimate the height of this view according to the visible number and scale.
+     *
+     * @return the height of this view for showing all visible item
      */
     private fun getVisibleHeight(): Int {
-//        val totalRatio = (0 until visibleItemNumber).fold(0F) { acc, cur ->
-//            acc + sqrt(1 - ((cur + selectedTextHeight / 2 / textHeight) / visibleItemNumber).toFloat().pow(2))
-//        }
-//        return (textHeight * totalRatio * 2).toInt() + selectedTextHeight
-        return if (enableFlatDisplay) {
-            selectedTextHeight / 2 + textHeight * visibleItemNumber
-        } else {
-            ((selectedTextHeight / 2 + textHeight * visibleItemNumber) * 4 / (2 * 3.14)).toInt() * 2
+        var offset = 0
+        var height = selectedTextHeight / 2 + textHeight * visibleItemNumber
+
+        // this function is invoked when measure, so it shouldn't take too long
+        repeat(visibleItemNumber * 2) {
+            // compute the actual height if the height is current estimated value
+            offset = selectedTextHeight / 2
+            var scale = 1F
+
+            repeat(visibleItemNumber) {
+                scale = getScale(offset.toFloat(), height)
+                if (!enableLinearScale) {
+                    scale *= scale
+                }
+                offset += (textHeight * scale).toInt()
+            }
+
+            scale = getScale(offset.toFloat(), height)
+            if (!enableLinearScale) {
+                scale *= scale
+            }
+            paint.textSize = textSize * scale
+            paint.textScaleX = 1F
+            val fm = paint.fontMetrics
+            if (abs(height - offset) > fm.descent && fm.descent > 1) {
+                // Let the height be the offset of this iteration, so estimated result will be
+                // closer to the theoretical value in the next iteration.
+                height = offset
+            } else {
+                // The difference between height and offset is good enough when it is smaller than
+                // the descent. Or it is acceptable if the descent is smaller than 1px.
+                return@repeat
+            }
         }
+
+        return height * 2
     }
 
     override fun onTouchEvent(event: MotionEvent?): Boolean {
@@ -261,7 +289,6 @@ class WheelView: View {
             if (enableCircle) {
                 currentIndex %= data.size
             }
-            Log.d(TAG, "onDraw: $currentScroll $textHeight")
             val text = data[currentIndex]
             // calculate the offset
             val offset = currentScroll % textHeight - textHeight / 2
@@ -289,7 +316,7 @@ class WheelView: View {
 
 
         // draw the other items on the both sides of selected item
-        (1..visibleItemNumber).forEach { index ->
+        (1..visibleItemNumber + 1).forEach { index ->
             paint.color = textColor
             canvas?.let {
                 val scaleTop = getScale(abs(curTop))
@@ -302,7 +329,7 @@ class WheelView: View {
 
                 if (upIndex >= 0) {
                     val text = data[upIndex]
-                    if (enableFlatDisplay) {
+                    if (enableLinearScale) {
                         paint.textSize = textSize * scaleTop
                         paint.textScaleX = 1F
                     } else {
@@ -334,7 +361,7 @@ class WheelView: View {
 
                 if (downIndex < data.size) {
                     val text = data[downIndex]
-                    if (enableFlatDisplay) {
+                    if (enableLinearScale) {
                         paint.textSize = textSize * scaleBottom
                         paint.textScaleX = 1F
                     } else {
@@ -389,9 +416,9 @@ class WheelView: View {
         }
     }
 
-    fun setEnableFlatDisplay(enable: Boolean) {
-        if (enable != enableFlatDisplay) {
-            enableFlatDisplay = enable
+    fun setEnableLinearScale(enable: Boolean) {
+        if (enable != enableLinearScale) {
+            enableLinearScale = enable
             requestLayout()
             invalidate()
         }
@@ -409,5 +436,6 @@ class WheelView: View {
 
     fun setTextAlign(align: Paint.Align) {
         paint.textAlign = align
+        invalidate()
     }
 }
