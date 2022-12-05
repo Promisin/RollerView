@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.*
@@ -49,9 +50,18 @@ class WheelView: View {
      */
     private var selectedTextHeight = 0
     /**
-     * the width can show the longest item
+     * the height required for scrolling across an item
+     */
+    private var itemHeight = 0
+    /**
+     * the width required for showing the longest item
      */
     private var maxWidth = 0
+
+    /**
+     * the height required for showing all visible items
+     */
+    private var maxHeight = 0
     /**
      * the index of the selected item
      */
@@ -76,6 +86,27 @@ class WheelView: View {
      * When set to true, there is no stretching for the text height.
      */
     private var enableLinearScale = false
+
+    /**
+     * When set to true, this view only show 2 * {@link #visibleItemNumber} + 1 items ( one selected item and
+     * visibleItemNumber items for each side ). In the meantime, the height of view is measured to
+     * display items of the specific quantity when the layout param is set to wrap_content.
+     * Otherwise, this view shows as more items as it can according to the height. In this case,
+     * need to be careful about custom scale {@link #setCustomScale}, the extremely small scale may
+     * cause wheel view draw too many items.
+     */
+    private var useVisibleNumber = true
+
+    /**
+     * The text scale ( except selected text ) can be customized by setting this param. It's a
+     * formula return the scale using given params. The offset is the margin between item and the
+     * middle line. The total is half the height of this view. The scale shouldn't be negative at
+     * anytime, and it can only be zero when the offset is bigger than total.
+     *
+     * It's very possibly that you need to set height of this view when using a custom scale, and
+     * wrap_content can't work properly.
+     */
+    private var customScale: ((offset: Float, total: Int) -> Float)? = null
 
     private var data = listOf<String>()
 
@@ -118,14 +149,8 @@ class WheelView: View {
             paint.textSize = max(selectedTextSize, textSize)
             paint.measureText(str).toInt()
         } ?: 0
-        // from the top of the first item and the bottom of the last item
-        scrollRange = data.size * textHeight
-        // if the size of data becomes smaller, the currentIndex may bigger than the size of data
-        if (currentIndex >= data.size) {
-            // scroll to the last item
-            currentIndex = data.size - 1
-        }
-        currentScroll = getScrollByIndex(currentIndex)
+        // measure visible height
+        measureVisibleHeight()
     }
 
     /**
@@ -135,7 +160,7 @@ class WheelView: View {
      * @return the scroll value
      */
     private fun getScrollByIndex(index: Int): Int {
-        return ((index + 0.5) * textHeight).toInt()
+        return ((index + 0.5) * itemHeight).toInt()
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -165,30 +190,46 @@ class WheelView: View {
                 heightSize
             }
             MeasureSpec.AT_MOST -> {
-                min(getVisibleHeight(), heightSize)
+                min(maxHeight, heightSize)
             }
             else -> {
-                getVisibleHeight()
+                maxHeight
             }
         }
         setMeasuredDimension(width, height)
+        // get view height at first, then getScale() can take effect
+        itemHeight = (textHeight * getScale(0F, height)).toInt()
+        // from the top of the first item and the bottom of the last item
+        scrollRange = data.size * itemHeight
+        // if the size of data becomes smaller, the currentIndex may bigger than the size of data
+        if (currentIndex >= data.size) {
+            // scroll to the last item
+            currentIndex = data.size - 1
+        }
+        currentScroll = getScrollByIndex(currentIndex)
     }
 
 
-    /**
-     * Compute the text size scale according to the offset. The offset is the space between the
-     * middle of this view ( view.height / 2 ) and the bottom ( if item is displayed above the
-     * middle ) or the top (if item is displayed below the middle ) of the item. The specific
-     * expression make the text looks like scrolling on a wheel.
-     *
-     * @param offset the space between the item and the central axis in pixels
-     * @return the scale of the item
-     */
+
     private fun getScale(offset: Float): Float {
-        return getScale(offset, height / 2)
+        return customScale?.invoke(offset, height / 2) ?: getDefaultScale(offset, height / 2)
     }
 
     private fun getScale(offset: Float, total: Int): Float {
+        return customScale?.invoke(offset, total) ?: getDefaultScale(offset, total)
+    }
+
+    /**
+     * Compute the text size scale according to the offset in the default way. The offset is the
+     * space between the middle of this view ( view.height / 2 ) and the bottom ( if item is
+     * displayed above the middle ) or the top (if item is displayed below the middle ) of the item.
+     * The specific expression make the text looks like scrolling on a wheel.
+     *
+     * @param offset the space between the item and the central axis in pixels
+     * @param total the biggest value that the offset can be
+     * @return the scale of the item
+     */
+    private fun getDefaultScale(offset: Float, total: Int): Float {
         return sqrt(1 - (offset / total).pow(2))
     }
 
@@ -197,12 +238,12 @@ class WheelView: View {
      *
      * @return the height of this view for showing all visible item
      */
-    private fun getVisibleHeight(): Int {
+    private fun measureVisibleHeight() {
         var offset = 0
         var height = selectedTextHeight / 2 + textHeight * visibleItemNumber
 
         // this function is invoked when measure, so it shouldn't take too long
-        repeat(visibleItemNumber * 2) {
+        for ( i in 0..visibleItemNumber * 2) {
             // compute the actual height if the height is current estimated value
             offset = selectedTextHeight / 2
             var scale = 1F
@@ -212,6 +253,7 @@ class WheelView: View {
                 if (!enableLinearScale) {
                     scale *= scale
                 }
+                Log.d(TAG, "$offset $scale")
                 offset += (textHeight * scale).toInt()
             }
 
@@ -229,11 +271,12 @@ class WheelView: View {
             } else {
                 // The difference between height and offset is good enough when it is smaller than
                 // the descent. Or it is acceptable if the descent is smaller than 1px.
-                return@repeat
+                Log.d(TAG, "measureVisibleHeight: ${abs(height - offset)}")
+                break
             }
         }
 
-        return height * 2
+        maxHeight = height * 2
     }
 
     override fun onTouchEvent(event: MotionEvent?): Boolean {
@@ -285,15 +328,16 @@ class WheelView: View {
         canvas?.let {
             paint.color = selectedTextColor
             // compute the index of selected item
-            currentIndex = currentScroll / textHeight
+            currentIndex = currentScroll / itemHeight
             if (enableCircle) {
                 currentIndex %= data.size
             }
             val text = data[currentIndex]
             // calculate the offset
-            val offset = currentScroll % textHeight - textHeight / 2
+            val offset = currentScroll % itemHeight - itemHeight / 2
             // calculate the scale by offset
-            paint.textSize = (textSize - selectedTextSize) / (textHeight / 2) * abs(offset) + selectedTextSize
+            paint.textSize = (textSize * getScale(0F) - selectedTextSize) / (itemHeight / 2) * abs(offset) + selectedTextSize
+            Log.d(TAG, "onDraw: $textSize $textHeight")
             // no horizontal scale for selected item
             paint.textScaleX = 1F
             val fm = paint.fontMetrics
@@ -315,71 +359,88 @@ class WheelView: View {
         }
 
 
-        // draw the other items on the both sides of selected item
-        (1..visibleItemNumber + 1).forEach { index ->
+        // draw above items
+        var count = 0
+        while (height / 2 + curTop > 0) {
             paint.color = textColor
-            canvas?.let {
-                val scaleTop = getScale(abs(curTop))
-                var upIndex = currentIndex - index
-                if (upIndex < 0 && enableCircle) {
-                    while (upIndex < 0) {
-                        upIndex += data.size
-                    }
+            count += 1
+            if (useVisibleNumber && count > visibleItemNumber) {
+                break
+            }
+            val scaleTop = getScale(abs(curTop))
+            var upIndex = currentIndex - count
+            if (upIndex < 0 && enableCircle) {
+                while (upIndex < 0) {
+                    upIndex += data.size
+                }
+            }
+
+            if (upIndex >= 0) {
+                val text = data[upIndex]
+                if (enableLinearScale) {
+                    paint.textSize = textSize * scaleTop
+                    paint.textScaleX = 1F
+                } else {
+                    // stretch the height of text
+                    paint.textSize = textSize * scaleTop * scaleTop
+                    paint.textScaleX = 1 / scaleTop
                 }
 
-                if (upIndex >= 0) {
-                    val text = data[upIndex]
-                    if (enableLinearScale) {
-                        paint.textSize = textSize * scaleTop
-                        paint.textScaleX = 1F
-                    } else {
-                        // stretch the height of text
-                        paint.textSize = textSize * scaleTop * scaleTop
-                        paint.textScaleX = 1 / scaleTop
-                    }
-
-                    val fm = paint.fontMetrics
-                    val textHeight = fm.descent - fm.ascent
-                    val start = when(paint.textAlign) {
-                        Paint.Align.LEFT -> { 0 }
-                        Paint.Align.RIGHT -> { width }
-                        Paint.Align.CENTER -> { width / 2 }
-                        else -> { width / 2 }
-                    }
-                    it.drawText(text, start.toFloat(), height / 2 + curTop - fm.descent, paint)
-                    curTop -= textHeight
+                val fm = paint.fontMetrics
+                val textHeight = fm.descent - fm.ascent
+                if (textHeight < 1) {
+                    break
                 }
-
-
-                val scaleBottom = getScale(abs(curBottom))
-                var downIndex = currentIndex + index
-                if (downIndex >= data.size && enableCircle) {
-                    while (downIndex >= data.size) {
-                        downIndex -= data.size
-                    }
+                val start = when(paint.textAlign) {
+                    Paint.Align.LEFT -> { 0 }
+                    Paint.Align.RIGHT -> { width }
+                    Paint.Align.CENTER -> { width / 2 }
+                    else -> { width / 2 }
                 }
+                canvas?.drawText(text, start.toFloat(), height / 2 + curTop - fm.descent, paint)
+                curTop -= textHeight
+            }
+        }
 
-                if (downIndex < data.size) {
-                    val text = data[downIndex]
-                    if (enableLinearScale) {
-                        paint.textSize = textSize * scaleBottom
-                        paint.textScaleX = 1F
-                    } else {
-                        // stretch the height of text
-                        paint.textSize = textSize * scaleBottom * scaleBottom
-                        paint.textScaleX = 1 / scaleBottom
-                    }
-                    val fm = paint.fontMetrics
-                    val textHeight = fm.descent - fm.ascent
-                    val start = when(paint.textAlign) {
-                        Paint.Align.LEFT -> { 0 }
-                        Paint.Align.RIGHT -> { width }
-                        Paint.Align.CENTER -> { width / 2 }
-                        else -> { width / 2 }
-                    }
-                    it.drawText(text, start.toFloat(), height / 2 + curBottom - fm.ascent, paint)
-                    curBottom += textHeight
+        // draw below items
+        count = 0
+        while (height / 2 - curBottom > 0) {
+            paint.color = textColor
+            count += 1
+            if (useVisibleNumber && count > visibleItemNumber) {
+                break
+            }
+            val scaleBottom = getScale(abs(curBottom))
+            var downIndex = currentIndex + count
+            if (downIndex >= data.size && enableCircle) {
+                while (downIndex >= data.size) {
+                    downIndex -= data.size
                 }
+            }
+
+            if (downIndex < data.size) {
+                val text = data[downIndex]
+                if (enableLinearScale) {
+                    paint.textSize = textSize * scaleBottom
+                    paint.textScaleX = 1F
+                } else {
+                    // stretch the height of text
+                    paint.textSize = textSize * scaleBottom * scaleBottom
+                    paint.textScaleX = 1 / scaleBottom
+                }
+                val fm = paint.fontMetrics
+                val textHeight = fm.descent - fm.ascent
+                if (textHeight < 1) {
+                    break
+                }
+                val start = when(paint.textAlign) {
+                    Paint.Align.LEFT -> { 0 }
+                    Paint.Align.RIGHT -> { width }
+                    Paint.Align.CENTER -> { width / 2 }
+                    else -> { width / 2 }
+                }
+                canvas?.drawText(text, start.toFloat(), height / 2 + curBottom - fm.ascent, paint)
+                curBottom += textHeight
             }
         }
     }
@@ -420,6 +481,22 @@ class WheelView: View {
         if (enable != enableLinearScale) {
             enableLinearScale = enable
             requestLayout()
+            invalidate()
+        }
+    }
+
+    fun setCustomScale(scale: (offset: Float, total: Int) -> Float) {
+        customScale = scale
+        if (getScale(0F) == 0F) {
+            throw IllegalArgumentException("The scale value when offset is 0 should never be zero")
+        }
+        requestLayout()
+        invalidate()
+    }
+
+    fun setUseVisibleNumber(enable: Boolean) {
+        if (enable != useVisibleNumber) {
+            useVisibleNumber = enable
             invalidate()
         }
     }
