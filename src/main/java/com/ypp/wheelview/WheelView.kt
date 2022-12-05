@@ -253,7 +253,6 @@ class WheelView: View {
                 if (!enableLinearScale) {
                     scale *= scale
                 }
-                Log.d(TAG, "$offset $scale")
                 offset += (textHeight * scale).toInt()
             }
 
@@ -271,7 +270,6 @@ class WheelView: View {
             } else {
                 // The difference between height and offset is good enough when it is smaller than
                 // the descent. Or it is acceptable if the descent is smaller than 1px.
-                Log.d(TAG, "measureVisibleHeight: ${abs(height - offset)}")
                 break
             }
         }
@@ -337,7 +335,6 @@ class WheelView: View {
             val offset = currentScroll % itemHeight - itemHeight / 2
             // calculate the scale by offset
             paint.textSize = (textSize * getScale(0F) - selectedTextSize) / (itemHeight / 2) * abs(offset) + selectedTextSize
-            Log.d(TAG, "onDraw: $textSize $textHeight")
             // no horizontal scale for selected item
             paint.textScaleX = 1F
             val fm = paint.fontMetrics
