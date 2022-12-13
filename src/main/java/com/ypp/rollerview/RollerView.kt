@@ -1,18 +1,18 @@
-package com.ypp.wheelview
+package com.ypp.rollerview
 
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import com.ypp.wheelview.R
 import kotlin.math.*
 
-class WheelView: View {
+class RollerView: View {
     companion object {
-        private const val TAG = "WheelView"
+        private const val TAG = "RollerView"
         private const val DEFAULT_TEXT_COLOR = Color.BLACK
         private const val DEFAULT_SELECTED_TEXT_COLOR = DEFAULT_TEXT_COLOR
         private const val DEFAULT_TEXT_SIZE = 24F
@@ -122,12 +122,12 @@ class WheelView: View {
         defStyleRes: Int
     ) : super(context, attrs, defStyleAttr, defStyleRes) {
         attrs?.let {
-            val typedArray = context.obtainStyledAttributes(it, R.styleable.WheelView)
-            textColor = typedArray.getColor(R.styleable.WheelView_textColor, DEFAULT_TEXT_COLOR)
-            selectedTextColor = typedArray.getColor(R.styleable.WheelView_textColorSelected, DEFAULT_SELECTED_TEXT_COLOR)
-            textSize = typedArray.getDimension(R.styleable.WheelView_textSize, DEFAULT_TEXT_SIZE)
-            selectedTextSize = typedArray.getDimension(R.styleable.WheelView_textSizeSelected, textSize * 1.5F)
-            visibleItemNumber = typedArray.getInteger(R.styleable.WheelView_visibleItemNumber, DEFAULT_VISIBLE_ITEM_NUMBER)
+            val typedArray = context.obtainStyledAttributes(it, R.styleable.RollerView)
+            textColor = typedArray.getColor(R.styleable.RollerView_textColor, DEFAULT_TEXT_COLOR)
+            selectedTextColor = typedArray.getColor(R.styleable.RollerView_textColorSelected, DEFAULT_SELECTED_TEXT_COLOR)
+            textSize = typedArray.getDimension(R.styleable.RollerView_textSize, DEFAULT_TEXT_SIZE)
+            selectedTextSize = typedArray.getDimension(R.styleable.RollerView_textSizeSelected, textSize * 1.5F)
+            visibleItemNumber = typedArray.getInteger(R.styleable.RollerView_visibleItemNumber, DEFAULT_VISIBLE_ITEM_NUMBER)
             typedArray.recycle()
         }
     }
