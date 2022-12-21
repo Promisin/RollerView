@@ -1,12 +1,16 @@
 package com.ypp.rollerview
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
+import android.util.Log
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import kotlin.math.*
 
 class RollerView: View {
@@ -73,6 +77,16 @@ class RollerView: View {
     private var lastY = 0
 
     /**
+     * the velocity tracker of touch event
+     */
+    private val tracker = VelocityTracker.obtain()
+
+    /**
+     * smooth scroll animator
+     */
+    private var scrollAnimator: ValueAnimator? = null
+
+    /**
      * If true, scroll to bottom will back to top and scroll to top will go down to bottom, and the
      * last item show above the first item.
      * If false, this view cannot scroll to out of the scroll range.
@@ -107,6 +121,9 @@ class RollerView: View {
      */
     private var customScale: ((offset: Float, total: Int) -> Float)? = null
 
+    /**
+     * data source
+     */
     private var data = listOf<String>()
 
 
@@ -276,41 +293,117 @@ class RollerView: View {
         maxHeight = height * 2
     }
 
+    /**
+     * Convert a integer to a valid scroll value. When the value is out of scroll range, convert it
+     * according to the {@link #enableCircle}.
+     */
+    fun convertToValidScroll(scroll: Int): Int {
+        var result = scroll
+        if (enableCircle) {
+            // make the item show in a circle
+            while (result > scrollRange) {
+                result -= scrollRange
+            }
+            while (result < 0) {
+                result += scrollRange
+            }
+        } else {
+            // cannot scroll to out of the scroll range
+            result = min(result, scrollRange - 1)
+            result = max(result, 0)
+        }
+        return result
+    }
+
     override fun onTouchEvent(event: MotionEvent?): Boolean {
         val y = event!!.y.toInt()
+        tracker.addMovement(event)
         when(event.action) {
             MotionEvent.ACTION_DOWN -> {
                 lastY = y
+                if (scrollAnimator?.isRunning == true) {
+                    // abort the animation when user touch the screen
+                    scrollAnimator?.cancel()
+                }
             }
             MotionEvent.ACTION_MOVE -> {
                 // scroll with finger
                 val offsetY = y - lastY
                 currentScroll -= offsetY
 
-                if (enableCircle) {
-                    // make the item show in a circle
-                    while (currentScroll > scrollRange) {
-                        currentScroll -= scrollRange
-                    }
-                    while (currentScroll < 0) {
-                        currentScroll += scrollRange
-                    }
-                } else {
-                    // cannot scroll to out of the scroll range
-                    currentScroll = min(currentScroll, scrollRange - 1)
-                    currentScroll = max(currentScroll, 0)
-                }
+                currentScroll = convertToValidScroll(currentScroll)
 
                 lastY = y
                 invalidate()
             }
             MotionEvent.ACTION_UP -> {
-                // scroll to the middle of current index item when user take up the finger
-                currentScroll = getScrollByIndex(currentIndex)
+                // keep scroll for a while, the distance depends on the velocity of the movement of
+                // finger
+                tracker.computeCurrentVelocity(1000)
+                val yV = tracker.yVelocity
+                if (abs(yV) < 200) {
+                    // do not keep scroll when the velocity is smaller than 200 pixels per second
+                    // just scroll to the middle of current item
+                    smoothScrollToCurrent()
+                } else {
+                    smoothScrollTo(currentScroll - (yV / 3).toInt(), yV)
+                }
+                tracker.clear()
                 invalidate()
             }
         }
         return true
+    }
+
+    /**
+     * scroll to the y without animation
+     */
+    private fun scrollTo(y: Int) {
+        check(y in 0..scrollRange)
+        currentScroll = y
+        invalidate()
+    }
+
+    /**
+     * Scroll to the y in a decreasing speed from startV to zero.
+     */
+    private fun smoothScrollTo(y: Int, startV: Float) {
+        val oldY = currentScroll
+        if (oldY != y) {
+            // scroll to the middle of a item
+            val offset = y % itemHeight - itemHeight / 2
+            scrollAnimator = ValueAnimator.ofInt(oldY, y - offset).apply {
+                duration = 1000
+                interpolator = ComplexAccelerateInterpolator(abs(startV))
+                addUpdateListener { animator ->
+                    val targetScroll = animator.animatedValue as Int
+                    if (enableCircle || (targetScroll in 0..scrollRange)) {
+                        scrollTo(convertToValidScroll(targetScroll))
+                    } else {
+                        // when the enableCircle is false and has scrolled to the boundary of this
+                        // view, stop the animator and scroll the middle of the current item
+                        cancel()
+                        smoothScrollToCurrent()
+                    }
+                }
+            }
+            scrollAnimator?.start()
+        }
+    }
+
+    /**
+     * scroll to the middle of the current item smoothly
+     */
+    private fun smoothScrollToCurrent() {
+        scrollAnimator = ValueAnimator.ofInt(currentScroll, getScrollByIndex(currentIndex)).apply {
+            duration = 500
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { animator ->
+                val targetScroll = animator.animatedValue as Int
+                scrollTo(convertToValidScroll(targetScroll))
+            }
+        }
+        scrollAnimator?.start()
     }
 
     override fun onDraw(canvas: Canvas?) {
